@@ -1,0 +1,6 @@
+.cache/
+vosk/vendor/
+vosk/models/
+_site/
+qa/
+
