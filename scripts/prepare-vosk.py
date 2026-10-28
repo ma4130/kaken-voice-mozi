@@ -33,13 +33,13 @@ out = ROOT / 'vosk'
 shutil.copyfile(runtime, out / 'vendor/vosk.js')
 with zipfile.ZipFile(model) as archive, tarfile.open(out / 'models/ja-0.22.tar.gz', 'w:gz', format=tarfile.USTAR_FORMAT) as tar:
     for member in archive.infolist():
-        if member.is_dir(): continue
         path = Path(member.filename)
         if path.is_absolute() or '..' in path.parts: raise ValueError('Invalid archive path')
-        data = archive.read(member)
+        data = b"" if member.is_dir() else archive.read(member)
         info = tarfile.TarInfo(member.filename)
+        if member.is_dir(): info.type = tarfile.DIRTYPE
         info.size = len(data)
-        info.mode = 0o644
+        info.mode = 0o755 if member.is_dir() else 0o644
         info.mtime = 0
         tar.addfile(info, io.BytesIO(data))
 print('Verified Vosk runtime and Japanese model prepared.', flush=True)
