@@ -31,11 +31,16 @@ out = ROOT / 'vosk'
 (out / 'vendor').mkdir(exist_ok=True)
 (out / 'models').mkdir(exist_ok=True)
 shutil.copyfile(runtime, out / 'vendor/vosk.js')
-with zipfile.ZipFile(model) as archive, tarfile.open(out / 'models/ja-0.22.tar.gz', 'w:gz', format=tarfile.USTAR_FORMAT) as tar:
+with zipfile.ZipFile(model) as archive, tarfile.open(out / 'models/ja-fast-0.22-v1.tar.gz', 'w:gz', format=tarfile.USTAR_FORMAT) as tar:
     for member in archive.infolist():
         path = Path(member.filename)
         if path.is_absolute() or '..' in path.parts: raise ValueError('Invalid archive path')
         data = b"" if member.is_dir() else archive.read(member)
+        if member.filename.endswith('/conf/model.conf'):
+            config = data.decode('utf-8')
+            for old, new in [('--max-active=7000', '--max-active=3000'), ('--beam=13.0', '--beam=10.0'), ('--lattice-beam=4.0', '--lattice-beam=3.0'), ('--endpoint.rule2.min-trailing-silence=0.5', '--endpoint.rule2.min-trailing-silence=0.25'), ('--endpoint.rule3.min-trailing-silence=1.0', '--endpoint.rule3.min-trailing-silence=0.5'), ('--endpoint.rule4.min-trailing-silence=2.0', '--endpoint.rule4.min-trailing-silence=1.0')]:
+                config = config.replace(old, new)
+            data = config.encode('utf-8')
         info = tarfile.TarInfo(member.filename)
         if member.is_dir(): info.type = tarfile.DIRTYPE
         info.size = len(data)
