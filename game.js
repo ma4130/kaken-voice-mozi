@@ -1,14 +1,34 @@
 const $=s=>document.querySelector(s),canvas=$('#game'),ctx=canvas.getContext('2d');
-let w=1000,h=700,last=0,cooldown=0,level=0,paused=false,audio,analyser,stream,recognition,mic=false,sound=false,epoch=0,recognizing=false,peakLevel=0,letters=[];
+let w=1000,h=700,last=0,cooldown=0,level=0,paused=false,audio,analyser,stream,recognition,mic=false,sound=false,epoch=0,recognizing=false,peakLevel=0,lastVoiceAt=0,recognitionWatch=null,letters=[];
 const rand=(a,b)=>a+Math.random()*(b-a),colors=['#d6ff44','#ffac78','#c6b7ff','#8edbd0'];
 function resize(){const r=canvas.getBoundingClientRect();w=r.width;h=r.height;const d=Math.min(devicePixelRatio,2);canvas.width=w*d;canvas.height=h*d;ctx.setTransform(d,0,0,d,0,0)}new ResizeObserver(resize).observe(canvas);
 function message(t){$('#toast').textContent=t;setTimeout(()=>{$('#toast').textContent=''},4500)}
 function audioContext(){audio??=new (window.AudioContext||window.webkitAudioContext)();audio.resume().catch(()=>{});return audio}
 function beep(freq,duration=.12){if(!sound)return;try{const a=audioContext(),o=a.createOscillator(),g=a.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,a.currentTime);o.frequency.exponentialRampToValueAtTime(50,a.currentTime+duration);g.gain.setValueAtTime(.055,a.currentTime);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+duration);o.connect(g).connect(a.destination);o.start();o.stop(a.currentTime+duration)}catch{}}
-function stopMic(){mic=false;stream?.getTracks().forEach(t=>t.stop());stream=null;analyser=null;if(recognition){recognition.onend=null;recognition.abort();recognition=null}recognizing=false;$('#start').disabled=false}
+function stopMic(){mic=false;clearInterval(recognitionWatch);recognitionWatch=null;stream?.getTracks().forEach(t=>t.stop());stream=null;analyser=null;if(recognition){recognition.onend=null;recognition.abort();recognition=null}recognizing=false;$('#start').disabled=false}
 const wordSegmenter=typeof Intl.Segmenter==='function'?new Intl.Segmenter('ja',{granularity:'word'}):null;
 function speechWords(text){if(wordSegmenter)return Array.from(wordSegmenter.segment(text)).filter(part=>part.isWordLike).map(part=>part.segment);return text.match(/[一-龯々]+[ぁ-ゖー]*|[ァ-ヺー]+|[ぁ-ゖー]{1,4}|[A-Za-z0-9]+/gu)||[]}
-function startRecognition(token){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){stopMic();$('#start').textContent='マイクを使う';message('このブラウザーは音声認識に対応していません。Chromeで開いてください。');return}const rec=new SR();recognition=rec;rec.lang='ja-JP';rec.continuous=true;rec.interimResults=true;let live=new Map(),finished=new Set();rec.onstart=()=>{live.clear();finished.clear()};rec.onresult=e=>{if(token!==epoch||!mic)return;for(let i=e.resultIndex;i<e.results.length;i++){const result=e.results[i],text=result[0].transcript.trim();if(paused||!text||finished.has(i))continue;const power=Math.max(.2,peakLevel,level),parts=speechWords(text);let active=live.get(i)||[];parts.forEach((word,j)=>{let letter=active[j];if(letter){if(letter.text!==word){letter.text=word;letter.age=.2}letter.size=Math.max(letter.size,22+power*85)}else{letter=emit(word,power);if(letter)active[j]=letter}});for(let j=parts.length;j<active.length;j++){const index=letters.indexOf(active[j]);if(index>=0)letters.splice(index,1)}active.length=parts.length;live.set(i,active);if(result.isFinal){finished.add(i);live.delete(i);peakLevel=0}}};rec.onerror=e=>{if(['not-allowed','service-not-allowed','audio-capture'].includes(e.error)){stopMic();$('#start').textContent='マイクを使う';message('音声認識を利用できません。マイクの許可と接続を確認してください。')}else if(e.error==='network'){message('音声認識に接続できません。通信環境を確認してください。')}};rec.onend=()=>{if(mic&&token===epoch)setTimeout(()=>{if(mic&&token===epoch)try{rec.start()}catch{}},100)};try{rec.start();recognizing=true}catch{stopMic();$('#start').textContent='マイクを使う';message('音声認識を開始できませんでした。')}}
+function startRecognition(token){
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){stopMic();$('#start').textContent='マイクを使う';message('このブラウザーは音声認識に対応していません。Chromeで開いてください。');return}
+ if(!mic||token!==epoch)return;
+ const rec=new SR();recognition=rec;rec.lang='ja-JP';rec.continuous=true;rec.interimResults=true;
+ const live=new Map(),finished=new Set();let lastResultAt=performance.now(),startedAt=lastResultAt,started=false,restarting=false;
+ const current=()=>mic&&token===epoch&&recognition===rec;
+ function restart(delay=120){if(!current()||restarting)return;restarting=true;recognizing=false;clearInterval(recognitionWatch);recognitionWatch=null;rec.onend=null;rec.onresult=null;rec.onerror=null;try{rec.abort()}catch{}setTimeout(()=>{if(current())startRecognition(token)},delay)}
+ rec.onstart=()=>{if(!current())return;started=true;recognizing=true;lastResultAt=performance.now()};
+ rec.onresult=e=>{if(!current()||restarting)return;lastResultAt=performance.now();for(let i=e.resultIndex;i<e.results.length;i++){
+  const result=e.results[i],text=result[0].transcript.trim();if(paused||!text||finished.has(i))continue;
+  const power=Math.max(.2,peakLevel,level),parts=speechWords(text);let active=live.get(i)||[];
+  parts.forEach((word,j)=>{let letter=active[j];if(letter){if(letter.text!==word){if(letters.includes(letter)){letter.text=word;letter.age=.2;letter.size=Math.max(letter.size,22+power*85)}else{letter=emit(word,power);active[j]=letter}}}else{letter=emit(word,power);if(letter)active[j]=letter}});
+  for(let j=parts.length;j<active.length;j++){const index=letters.indexOf(active[j]);if(index>=0)letters.splice(index,1)}
+  active.length=parts.length;live.set(i,active);if(result.isFinal){finished.add(i);live.delete(i);peakLevel=0}
+ }};
+ rec.onerror=e=>{if(!current())return;if(['not-allowed','service-not-allowed','audio-capture'].includes(e.error)){stopMic();$('#start').textContent='マイクを使う';message('音声認識を利用できません。マイクの許可と接続を確認してください。')}else{restart(e.error==='network'?1000:150)}};
+ rec.onend=()=>restart();
+ clearInterval(recognitionWatch);recognitionWatch=setInterval(()=>{if(!current())return;const now=performance.now();if((!started&&now-startedAt>8000)||(now-lastResultAt>6500&&lastVoiceAt>lastResultAt&&now-lastVoiceAt<2000))restart()},1000);
+ try{rec.start()}catch{restart(500)}
+}
 
 async function enableMic(){if(mic){epoch++;stopMic();$('#start').textContent='マイクを使う';return}const token=++epoch;$('#start').disabled=true;try{const acquired=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}});if(token!==epoch){acquired.getTracks().forEach(t=>t.stop());return}stream=acquired;const a=audioContext();analyser=a.createAnalyser();analyser.fftSize=1024;a.createMediaStreamSource(stream).connect(analyser);mic=true;$('#start').textContent='マイク接続中';startRecognition(token)}catch{message('マイクを使えません。マイクの許可を確認してください。')}finally{$('#start').disabled=false}}
 $('#start').onclick=enableMic;
@@ -19,6 +39,6 @@ const samples=new Float32Array(1024);
 function text3d(v){ctx.save();ctx.translate(v.x,v.y);ctx.rotate(v.angle);const size=Math.min(v.size,w/Math.max(3,Array.from(v.text).length)*.85);ctx.font='900 '+size+'px "Noto Sans JP",sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=3;ctx.globalAlpha=Math.min(1,v.age*5,(v.life-v.age)*1.5);for(let d=10;d>0;d-=2){ctx.strokeStyle='#3f4b30';ctx.strokeText(v.text,d,d);ctx.fillStyle='#8eaa69';ctx.fillText(v.text,d,d)}ctx.strokeStyle='#3f4b30';ctx.strokeText(v.text,0,0);ctx.fillStyle=v.color;ctx.fillText(v.text,0,0);ctx.restore()}
 function frame(now){const dt=Math.min(.05,(now-last)/1000||.016);last=now;const t=now/1000;ctx.fillStyle='#f6f9ec';ctx.fillRect(0,0,w,h);const glow=ctx.createRadialGradient(w*(.5+Math.sin(t*.12)*.15),h*.55,0,w*.5,h*.5,w*.75);glow.addColorStop(0,'#dbedb8');glow.addColorStop(1,'#f9faf000');ctx.fillStyle=glow;ctx.fillRect(0,0,w,h);
 for(let i=0;i<24;i++){ctx.fillStyle='#8da76725';ctx.beginPath();ctx.arc((i*137.3)%w,(i*97.7-t*(3+i%4)+h*100)%h,1.5+i%3,0,Math.PI*2);ctx.fill()}
-if(!paused){cooldown-=dt;let raw=0;if(analyser){analyser.getFloatTimeDomainData(samples);raw=Math.min(1,Math.sqrt(samples.reduce((a,v)=>a+v*v,0)/samples.length)*Number($('#sensitivity').value)*3)}level+=(raw-level)*.4;peakLevel=Math.max(peakLevel*Math.exp(-dt*.2),level);for(let i=letters.length-1;i>=0;i--){const v=letters[i];v.age+=dt;v.x+=v.vx*dt;v.y+=v.vy*dt;v.angle+=v.spin*dt;if(v.age>v.life)letters.splice(i,1)}}letters.forEach(text3d);requestAnimationFrame(frame)}requestAnimationFrame(frame);
+if(!paused){cooldown-=dt;let raw=0;if(analyser){analyser.getFloatTimeDomainData(samples);raw=Math.min(1,Math.sqrt(samples.reduce((a,v)=>a+v*v,0)/samples.length)*Number($('#sensitivity').value)*3)}if(raw>.12)lastVoiceAt=performance.now();level+=(raw-level)*.4;peakLevel=Math.max(peakLevel*Math.exp(-dt*.2),level);for(let i=letters.length-1;i>=0;i--){const v=letters[i];v.age+=dt;v.x+=v.vx*dt;v.y+=v.vy*dt;v.angle+=v.spin*dt;if(v.age>v.life)letters.splice(i,1)}}letters.forEach(text3d);requestAnimationFrame(frame)}requestAnimationFrame(frame);
 window.addEventListener('pagehide',()=>{epoch++;stopMic()});
 
