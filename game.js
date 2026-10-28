@@ -6,20 +6,19 @@ function message(t){$('#toast').textContent=t;setTimeout(()=>{$('#toast').textCo
 function audioContext(){audio??=new (window.AudioContext||window.webkitAudioContext)();audio.resume().catch(()=>{});return audio}
 function beep(freq,duration=.12){if(!sound)return;try{const a=audioContext(),o=a.createOscillator(),g=a.createGain();o.type='triangle';o.frequency.setValueAtTime(freq,a.currentTime);o.frequency.exponentialRampToValueAtTime(50,a.currentTime+duration);g.gain.setValueAtTime(.055,a.currentTime);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+duration);o.connect(g).connect(a.destination);o.start();o.stop(a.currentTime+duration)}catch{}}
 function stopMic(){mic=false;clearInterval(recognitionWatch);recognitionWatch=null;stream?.getTracks().forEach(t=>t.stop());stream=null;analyser=null;if(recognition){recognition.onend=null;recognition.abort();recognition=null}recognizing=false;$('#start').disabled=false}
-const wordSegmenter=typeof Intl.Segmenter==='function'?new Intl.Segmenter('ja',{granularity:'word'}):null;
-function speechWords(text){if(wordSegmenter)return Array.from(wordSegmenter.segment(text)).filter(part=>part.isWordLike).map(part=>part.segment);return text.match(/[一-龯々]+[ぁ-ゖー]*|[ァ-ヺー]+|[ぁ-ゖー]{1,4}|[A-Za-z0-9]+/gu)||[]}
+function speechChunks(text){const chars=Array.from(text.replace(/[\s、。！？!?.,]/gu,'')),chunks=[];for(let i=0;i<chars.length;i+=2)chunks.push(chars.slice(i,i+2).join(''));return chunks}
 function startRecognition(token){
  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
  if(!SR){stopMic();$('#start').textContent='マイクを使う';message('このブラウザーは音声認識に対応していません。Chromeで開いてください。');return}
  if(!mic||token!==epoch)return;
- const rec=new SR();recognition=rec;rec.lang='ja-JP';rec.continuous=true;rec.interimResults=true;
+ const rec=new SR();recognition=rec;rec.maxAlternatives=1;rec.lang='ja-JP';rec.continuous=true;rec.interimResults=true;
  const live=new Map(),finished=new Set();let lastResultAt=performance.now(),startedAt=lastResultAt,started=false,restarting=false;
  const current=()=>mic&&token===epoch&&recognition===rec;
- function restart(delay=120){if(!current()||restarting)return;restarting=true;recognizing=false;clearInterval(recognitionWatch);recognitionWatch=null;rec.onend=null;rec.onresult=null;rec.onerror=null;try{rec.abort()}catch{}setTimeout(()=>{if(current())startRecognition(token)},delay)}
+ function restart(delay=50){if(!current()||restarting)return;restarting=true;recognizing=false;clearInterval(recognitionWatch);recognitionWatch=null;rec.onend=null;rec.onresult=null;rec.onerror=null;try{rec.abort()}catch{}setTimeout(()=>{if(current())startRecognition(token)},delay)}
  rec.onstart=()=>{if(!current())return;started=true;recognizing=true;lastResultAt=performance.now()};
  rec.onresult=e=>{if(!current()||restarting)return;lastResultAt=performance.now();for(let i=e.resultIndex;i<e.results.length;i++){
   const result=e.results[i],text=result[0].transcript.trim();if(paused||!text||finished.has(i))continue;
-  const power=Math.max(.2,peakLevel,level),parts=speechWords(text);let active=live.get(i)||[];
+  const power=Math.max(.2,peakLevel,level),parts=speechChunks(text);let active=live.get(i)||[];
   parts.forEach((word,j)=>{let letter=active[j];if(letter){if(letter.text!==word){if(letters.includes(letter)){letter.text=word;letter.age=.2;letter.size=Math.max(letter.size,22+power*85)}else{letter=emit(word,power);active[j]=letter}}}else{letter=emit(word,power);if(letter)active[j]=letter}});
   for(let j=parts.length;j<active.length;j++){const index=letters.indexOf(active[j]);if(index>=0)letters.splice(index,1)}
   active.length=parts.length;live.set(i,active);if(result.isFinal){finished.add(i);live.delete(i);peakLevel=0}
