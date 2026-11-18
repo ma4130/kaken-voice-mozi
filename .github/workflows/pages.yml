@@ -21,12 +21,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - uses: actions/cache@v4
         with:
           path: .cache
-          key: vosk-ja-0.22-runtime-0.0.8-v1
+          key: vosk-ja-0.22-runtime-0.0.8-hiragana-v2
       - name: Prepare verified offline speech assets
         run: python scripts/prepare-vosk.py
+      - name: Prepare local hiragana conversion assets
+        run: |
+          npm install --prefix .cache/hiragana --no-save --ignore-scripts --no-audit --no-fund kuroshiro@1.2.1 kuroshiro-analyzer-kuromoji@1.1.0 kuromoji@0.1.2
+          mkdir -p hiragana/vendor hiragana/dict hiragana/licenses
+          cp .cache/hiragana/node_modules/kuroshiro/dist/kuroshiro.min.js hiragana/vendor/
+          cp .cache/hiragana/node_modules/kuroshiro-analyzer-kuromoji/dist/kuroshiro-analyzer-kuromoji.min.js hiragana/vendor/
+          cp .cache/hiragana/node_modules/kuromoji/dict/* hiragana/dict/
+          cp .cache/hiragana/node_modules/kuroshiro/LICENSE hiragana/licenses/kuroshiro-LICENSE
+          cp .cache/hiragana/node_modules/kuroshiro-analyzer-kuromoji/LICENSE hiragana/licenses/kuroshiro-analyzer-kuromoji-LICENSE
+          cp .cache/hiragana/node_modules/kuromoji/LICENSE hiragana/licenses/kuromoji-LICENSE
       - name: Assemble static website
         run: |
           mkdir -p _site
